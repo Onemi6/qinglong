@@ -1,65 +1,68 @@
-import intl from 'react-intl-universal';
-import React, { useState, useEffect, useRef, useMemo } from 'react';
+import useTableScrollHeight from '@/hooks/useTableScrollHeight';
+import { SharedContext } from '@/layouts';
+import { getCommandScript, getCrontabsNextDate } from '@/utils';
+import config from '@/utils/config';
+import { diffTime } from '@/utils/date';
+import { request } from '@/utils/http';
+import {
+  CheckCircleOutlined,
+  CheckOutlined,
+  ClockCircleOutlined,
+  CloseCircleOutlined,
+  CopyOutlined,
+  DeleteOutlined,
+  DownOutlined,
+  EditOutlined,
+  EllipsisOutlined,
+  FieldTimeOutlined,
+  Loading3QuartersOutlined,
+  PlusOutlined,
+  PushpinOutlined,
+  SettingOutlined,
+  StopOutlined,
+  UnorderedListOutlined
+} from '@ant-design/icons';
+import { PageContainer } from '@ant-design/pro-layout';
+import { history, useOutletContext } from '@umijs/max';
 import {
   Button,
+  Dropdown,
+  Input,
+  MenuProps,
   message,
   Modal,
-  Table,
-  Tag,
   Space,
-  Tooltip,
-  Dropdown,
-  Menu,
-  Typography,
-  Input,
-  Popover,
-  Tabs,
+  Table,
   TablePaginationConfig,
-  MenuProps,
+  Tabs,
+  Tag,
+  Typography
 } from 'antd';
-import {
-  ClockCircleOutlined,
-  Loading3QuartersOutlined,
-  CloseCircleOutlined,
-  FileTextOutlined,
-  EllipsisOutlined,
-  PlayCircleOutlined,
-  CheckCircleOutlined,
-  EditOutlined,
-  StopOutlined,
-  DeleteOutlined,
-  PauseCircleOutlined,
-  FieldTimeOutlined,
-  PushpinOutlined,
-  DownOutlined,
-  SettingOutlined,
-  PlusOutlined,
-  UnorderedListOutlined,
-  CheckOutlined,
-} from '@ant-design/icons';
-import config from '@/utils/config';
-import { PageContainer } from '@ant-design/pro-layout';
-import { request } from '@/utils/http';
-import CronModal, { CronLabelModal } from './modal';
-import CronLogModal from './logModal';
+import { ColumnProps } from 'antd/lib/table';
+import { FilterValue, SorterResult } from 'antd/lib/table/interface';
+import dayjs from 'dayjs';
+import { noop, omit } from 'lodash';
+import React, { useEffect, useRef, useState } from 'react';
+import intl from 'react-intl-universal';
+import { useVT } from 'virtualizedtableforantd4';
+import { getScheduleType } from './const';
 import CronDetailModal from './detail';
-import { diffTime } from '@/utils/date';
-import { history, useOutletContext } from '@umijs/max';
 import './index.less';
+import CronLogModal from './logModal';
+import CronModal, { CronLabelModal } from './modal';
+import {
+  CrontabStatus,
+  ICrontab,
+  OperationName,
+  OperationPath,
+  ScheduleType,
+} from './type';
 import ViewCreateModal from './viewCreateModal';
 import ViewManageModal from './viewManageModal';
-import { FilterValue, SorterResult } from 'antd/lib/table/interface';
-import { SharedContext } from '@/layouts';
-import useTableScrollHeight from '@/hooks/useTableScrollHeight';
-import { getCommandScript, getCrontabsNextDate, parseCrontab } from '@/utils';
-import { ColumnProps } from 'antd/lib/table';
-import { useVT } from 'virtualizedtableforantd4';
-import { ICrontab, OperationName, OperationPath, CrontabStatus } from './type';
-import Name from '@/components/name';
-import dayjs from 'dayjs';
 
 const { Text, Paragraph, Link } = Typography;
 const { Search } = Input;
+const SHOW_TAB_COUNT = 10;
 
 const Crontab = () => {
   const { headerStyle, isPhone, theme } = useOutletContext<SharedContext>();
@@ -75,18 +78,16 @@ const Crontab = () => {
           style={{
             wordBreak: 'break-all',
             marginBottom: 0,
-            color: '#1890ff'
+            color: '#1890ff',
+            cursor: 'pointer',
           }}
           ellipsis={{ tooltip: text, rows: 2 }}
+          onClick={() => {
+            setDetailCron(record);
+            setIsDetailModalVisible(true);
+          }}
         >
-          <Link
-            onClick={() => {
-              setDetailCron(record);
-              setIsDetailModalVisible(true);
-            }}
-          >
-            {record.name || '-'}
-          </Link>
+          <Link>{record.name || '-'}</Link>
         </Paragraph>
       ),
       sorter: {
@@ -262,23 +263,15 @@ const Crontab = () => {
         },
       },
       render: (text, record) => {
-        return dayjs(record.nextRunTime).format('YYYY-MM-DD HH:mm:ss');
+        return record.nextRunTime
+          ? dayjs(record.nextRunTime).format('YYYY-MM-DD HH:mm:ss')
+          : '-';
       },
     },
     {
       title: intl.get('关联订阅'),
       width: 185,
-      render: (text, record: any) =>
-        record.sub_id ? (
-          <Name
-            service={() =>
-              request.get(`${config.apiPrefix}subscriptions/${record.sub_id}`)
-            }
-            options={{ ready: record?.sub_id, cacheKey: record.sub_id }}
-          />
-        ) : (
-          '-'
-        ),
+      render: (text, record: any) => record?.subscription?.name || '-',
     },
     {
       title: intl.get('操作'),
@@ -388,14 +381,32 @@ const Crontab = () => {
     }
     request
       .get(url)
-      .then(({ code, data: _data }) => {
+      .then(async ({ code, data: _data }) => {
         if (code === 200) {
           const { data, total } = _data;
+          const subscriptions = await request.get(
+            `${config.apiPrefix}subscriptions?ids=${JSON.stringify([
+              ...new Set(data.map((x) => x.sub_id).filter(Boolean)),
+            ])}`,
+            {
+              onError: noop,
+            },
+          );
+          const subscriptionMap = Object.fromEntries(
+            subscriptions?.data?.map((x) => [x.id, x]),
+          );
+
           setValue(
             data.map((x) => {
+              const scheduleType = getScheduleType(x.schedule);
+              const nextRunTime =
+                scheduleType === ScheduleType.Normal
+                  ? getCrontabsNextDate(x.schedule, x.extra_schedules)
+                  : null;
               return {
                 ...x,
-                nextRunTime: getCrontabsNextDate(x.schedule, x.extra_schedules),
+                nextRunTime,
+                subscription: subscriptionMap?.[x.sub_id],
               };
             }),
           );
@@ -618,6 +629,7 @@ const Crontab = () => {
         icon:
           record.isDisabled === 1 ? <CheckCircleOutlined /> : <StopOutlined />,
       },
+      { label: intl.get('复制'), key: 'copy', icon: <CopyOutlined /> },
       { label: intl.get('删除'), key: 'delete', icon: <DeleteOutlined /> },
       {
         label: record.isPinned === 1 ? intl.get('取消置顶') : intl.get('置顶'),
@@ -652,6 +664,9 @@ const Crontab = () => {
     switch (key) {
       case 'edit':
         editCron(record, index);
+        break;
+      case 'copy':
+        editCron(omit(record, 'id'), index);
         break;
       case 'enableOrDisable':
         enabledOrDisabledCron(record, index);
@@ -798,7 +813,9 @@ const Crontab = () => {
 
   useEffect(() => {
     if (viewConf && enabledCronViews && enabledCronViews.length > 0) {
-      const view = enabledCronViews.slice(4).find((x) => x.id === viewConf.id);
+      const view = enabledCronViews
+        .slice(SHOW_TAB_COUNT)
+        .find((x) => x.id === viewConf.id);
       setMoreMenuActive(!!view);
     }
   }, [viewConf, enabledCronViews]);
@@ -828,7 +845,7 @@ const Crontab = () => {
       viewAction(key);
     },
     items: [
-      ...[...enabledCronViews].slice(4).map((x) => ({
+      ...[...enabledCronViews].slice(SHOW_TAB_COUNT).map((x) => ({
         label: (
           <Space style={{ display: 'flex', justifyContent: 'space-between' }}>
             <span>{x.name}</span>
@@ -854,6 +871,10 @@ const Crontab = () => {
         icon: <SettingOutlined />,
       },
     ],
+    style: {
+      maxHeight: 350,
+      overflowY: 'auto',
+    },
   };
 
   const getCronViews = () => {
@@ -944,7 +965,7 @@ const Crontab = () => {
         }
         onTabClick={tabClick}
         items={[
-          ...[...enabledCronViews].slice(0, 4).map((x) => ({
+          ...[...enabledCronViews].slice(0, SHOW_TAB_COUNT).map((x) => ({
             key: x.id,
             label: x.name,
           })),

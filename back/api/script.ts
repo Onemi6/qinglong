@@ -1,11 +1,4 @@
-import {
-  fileExist,
-  getFileContentByName,
-  readDirs,
-  getLastModifyFilePath,
-  readDir,
-  rmPath,
-} from '../config/util';
+import { fileExist, readDirs, readDir, rmPath } from '../config/util';
 import { Router, Request, Response, NextFunction } from 'express';
 import { Container } from 'typedi';
 import { Logger } from 'winston';
@@ -15,6 +8,7 @@ import { celebrate, Joi } from 'celebrate';
 import path, { join, parse } from 'path';
 import ScriptService from '../services/script';
 import multer from 'multer';
+import { writeFileWithLock } from '../shared/utils';
 const route = Router();
 
 const storage = multer.diskStorage({
@@ -75,14 +69,28 @@ export default (app: Router) => {
   route.get(
     '/detail',
     async (req: Request, res: Response, next: NextFunction) => {
-      const logger: Logger = Container.get('logger');
       try {
-        const filePath = join(
-          config.scriptPath,
+        const scriptService = Container.get(ScriptService);
+        const content = await scriptService.getFile(
           req.query.path as string,
           req.query.file as string,
         );
-        const content = await getFileContentByName(filePath);
+        res.send({ code: 200, data: content });
+      } catch (e) {
+        return next(e);
+      }
+    },
+  );
+
+  route.get(
+    '/:file',
+    async (req: Request, res: Response, next: NextFunction) => {
+      try {
+        const scriptService = Container.get(ScriptService);
+        const content = await scriptService.getFile(
+          req.query.path as string,
+          req.params.file,
+        );
         res.send({ code: 200, data: content });
       } catch (e) {
         return next(e);
@@ -122,7 +130,7 @@ export default (app: Router) => {
         }
 
         if (req.file) {
-          await fs.rename(req.file.path, join(path, req.file.filename));
+          await fs.rename(req.file.path, join(path, filename));
           return res.send({ code: 200 });
         }
 
@@ -149,7 +157,7 @@ export default (app: Router) => {
             await rmPath(originFilePath);
           }
         }
-        await fs.writeFile(filePath, content);
+        await writeFileWithLock(filePath, content);
         return res.send({ code: 200 });
       } catch (e) {
         return next(e);
@@ -175,7 +183,7 @@ export default (app: Router) => {
           path: string;
         };
         const filePath = join(config.scriptPath, path, filename);
-        await fs.writeFile(filePath, content);
+        await writeFileWithLock(filePath, content);
         return res.send({ code: 200 });
       } catch (e) {
         return next(e);
@@ -254,7 +262,7 @@ export default (app: Router) => {
         let { filename, content, path } = req.body;
         const { name, ext } = parse(filename);
         const filePath = join(config.scriptPath, path, `${name}.swap${ext}`);
-        await fs.writeFile(filePath, content || '', { encoding: 'utf8' });
+        await writeFileWithLock(filePath, content || '');
 
         const scriptService = Container.get(ScriptService);
         const result = await scriptService.runScript(filePath);

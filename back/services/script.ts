@@ -1,12 +1,13 @@
 import { Service, Inject } from 'typedi';
 import winston from 'winston';
-import path from 'path';
+import path, { join } from 'path';
 import SockService from './sock';
 import CronService from './cron';
 import ScheduleService, { TaskCallbacks } from './schedule';
 import config from '../config';
 import { TASK_COMMAND } from '../config/const';
-import { getPid, killTask, rmPath } from '../config/util';
+import { getFileContentByName, getPid, killTask, rmPath } from '../config/util';
+import taskLimit from '../shared/pLimit';
 
 @Service()
 export default class ScriptService {
@@ -41,9 +42,9 @@ export default class ScriptService {
     const relativePath = path.relative(config.scriptPath, filePath);
     const command = `${TASK_COMMAND} ${relativePath} now`;
     const pid = await this.scheduleService.runTask(
-      command,
+      `real_time=true ${command}`,
       this.taskCallbacks(filePath),
-      { command },
+      { command, id: relativePath.replace(/ /g, '-'), runOrigin: 'script' },
       'start',
     );
 
@@ -53,6 +54,7 @@ export default class ScriptService {
   public async stopScript(filePath: string, pid: number) {
     if (!pid) {
       const relativePath = path.relative(config.scriptPath, filePath);
+      taskLimit.removeQueuedCron(relativePath.replace(/ /g, '-'));
       pid = (await getPid(`${TASK_COMMAND} ${relativePath} now`)) as number;
     }
     try {
@@ -60,5 +62,16 @@ export default class ScriptService {
     } catch (error) {}
 
     return { code: 200 };
+  }
+
+  public async getFile(filePath: string, fileName: string) {
+    const finalPath = path.resolve(config.scriptPath, filePath, fileName);
+
+    if (!finalPath.startsWith(config.scriptPath)) {
+      return '';
+    }
+
+    const content = await getFileContentByName(finalPath);
+    return content;
   }
 }
