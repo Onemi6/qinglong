@@ -33,7 +33,7 @@ export default (app: Router) => {
     const logger: Logger = Container.get('logger');
     try {
       const userService = Container.get(UserService);
-      const authInfo = await userService.getUserInfo();
+      const authInfo = await userService.getAuthInfo();
       const { version, changeLog, changeLogLink, publishTime } =
         await parseVersion(config.versionFile);
 
@@ -216,7 +216,7 @@ export default (app: Router) => {
     '/reload',
     celebrate({
       body: Joi.object({
-        type: Joi.string().required(),
+        type: Joi.string().optional().allow('').allow(null),
       }),
     }),
     async (req: Request, res: Response, next: NextFunction) => {
@@ -340,12 +340,79 @@ export default (app: Router) => {
     },
   );
 
-  route.get('/log', async (req: Request, res: Response, next: NextFunction) => {
-    try {
-      const systemService = Container.get(SystemService);
-      await systemService.getSystemLog(res);
-    } catch (e) {
-      return next(e);
-    }
-  });
+  route.get(
+    '/log',
+    celebrate({
+      query: {
+        startTime: Joi.string().allow('').optional(),
+        endTime: Joi.string().allow('').optional(),
+        t: Joi.string().optional(),
+      },
+    }),
+    async (req: Request, res: Response, next: NextFunction) => {
+      try {
+        const systemService = Container.get(SystemService);
+        await systemService.getSystemLog(
+          res,
+          req.query as {
+            startTime?: string;
+            endTime?: string;
+          },
+        );
+      } catch (e) {
+        return next(e);
+      }
+    },
+  );
+
+  route.delete(
+    '/log',
+    async (req: Request, res: Response, next: NextFunction) => {
+      try {
+        const systemService = Container.get(SystemService);
+        await systemService.deleteSystemLog();
+        res.send({ code: 200 });
+      } catch (e) {
+        return next(e);
+      }
+    },
+  );
+
+  route.put(
+    '/auth/reset',
+    celebrate({
+      body: Joi.object({
+        retries: Joi.number().optional(),
+        twoFactorActivated: Joi.boolean().optional(),
+        password: Joi.string().optional(),
+      }),
+    }),
+    async (req: Request, res: Response, next: NextFunction) => {
+      try {
+        const userService = Container.get(UserService);
+        await userService.resetAuthInfo(req.body);
+        res.send({ code: 200, message: '更新成功' });
+      } catch (e) {
+        return next(e);
+      }
+    },
+  );
+
+  route.put(
+    '/config/timezone',
+    celebrate({
+      body: Joi.object({
+        timezone: Joi.string().allow('').allow(null),
+      }),
+    }),
+    async (req: Request, res: Response, next: NextFunction) => {
+      try {
+        const systemService = Container.get(SystemService);
+        const result = await systemService.updateTimezone(req.body);
+        res.send(result);
+      } catch (e) {
+        return next(e);
+      }
+    },
+  );
 };

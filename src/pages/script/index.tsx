@@ -46,6 +46,7 @@ import RenameModal from './renameModal';
 import { langs } from '@uiw/codemirror-extensions-langs';
 import { useHotkeys } from 'react-hotkeys-hook';
 import prettyBytes from 'pretty-bytes';
+import { canPreviewInMonaco } from '@/utils/monaco';
 const { Text } = Typography;
 
 const Script = () => {
@@ -66,6 +67,10 @@ const Script = () => {
     useState(false);
   const [currentNode, setCurrentNode] = useState<any>();
   const [expandedKeys, setExpandedKeys] = useState<string[]>([]);
+
+  const handleIsEditing = (filename: string, value: boolean) => {
+    setIsEditing(value && canPreviewInMonaco(filename));
+  };
 
   const getScripts = (needLoading: boolean = true) => {
     needLoading && setLoading(true);
@@ -108,6 +113,7 @@ const Script = () => {
       };
       const item = findNode(_data, (c) => c.key === obj.node.key);
       if (item) {
+        obj.node = item;
         setExpandedKeys([p as string]);
         onTreeSelect([vkey], obj);
       }
@@ -115,15 +121,20 @@ const Script = () => {
   };
 
   const onSelect = (value: any, node: any) => {
-    setSelect(node.key);
-    setCurrentNode(node);
-
     if (node.key === select || !value) {
       return;
     }
 
+    setSelect(node.key);
+    setCurrentNode(node);
+
     if (node.type === 'directory') {
       setValue(intl.get('请选择脚本文件'));
+      return;
+    }
+
+    if (!canPreviewInMonaco(node.title)) {
+      setValue(intl.get('当前文件不支持预览'));
       return;
     }
 
@@ -148,14 +159,14 @@ const Script = () => {
           content: <>{intl.get('当前修改未保存，确定离开吗')}</>,
           onOk() {
             onSelect(keys[0], e.node);
-            setIsEditing(false);
+            handleIsEditing(e.node.title, false);
           },
           onCancel() {
             console.log('Cancel');
           },
         });
       } else {
-        setIsEditing(false);
+        handleIsEditing(e.node.title, false);
         onSelect(keys[0], e.node);
       }
     },
@@ -195,18 +206,18 @@ const Script = () => {
     if (node.type === 'file') {
       setSelect(node.key);
       setCurrentNode(node);
-      setIsEditing(true);
+      handleIsEditing(node.title, true);
     }
   };
 
   const editFile = () => {
     setTimeout(() => {
-      setIsEditing(true);
+      handleIsEditing(currentNode.title, true);
     }, 300);
   };
 
   const cancelEdit = () => {
-    setIsEditing(false);
+    handleIsEditing(currentNode.title, false);
     setValue(intl.get('加载中...'));
     getDetail(currentNode);
   };
@@ -218,8 +229,9 @@ const Script = () => {
         <>
           {intl.get('确认保存文件')}
           <Text style={{ wordBreak: 'break-all' }} type="warning">
+            {' '}
             {currentNode.title}
-          </Text>{' '}
+          </Text>
           {intl.get('，保存后不可恢复')}
         </>
       ),
@@ -238,7 +250,7 @@ const Script = () => {
               if (code === 200) {
                 message.success(`保存成功`);
                 setValue(content);
-                setIsEditing(false);
+                handleIsEditing(currentNode.title, false);
               }
               resolve(null);
             })
@@ -258,7 +270,8 @@ const Script = () => {
         <>
           {intl.get('确认删除')}
           <Text style={{ wordBreak: 'break-all' }} type="warning">
-            {select}
+            {' '}
+            {select}{' '}
           </Text>
           {intl.get('文件')}
           {currentNode.type === 'directory' ? intl.get('夹及其子文件') : ''}
@@ -339,7 +352,7 @@ const Script = () => {
       }
       setData(newData);
       onSelect(_file.title, _file);
-      setIsEditing(true);
+      handleIsEditing(_file.title, true);
     }
     setIsAddFileModalVisible(false);
   };
@@ -375,7 +388,7 @@ const Script = () => {
 
   useEffect(() => {
     if (treeDom.current) {
-      setHeight(treeDom.current.clientHeight);
+      setHeight(treeDom.current.clientHeight - 6);
     }
   }, [treeDom.current, data]);
 
@@ -469,7 +482,9 @@ const Script = () => {
             label: intl.get('编辑'),
             key: 'edit',
             icon: <EditOutlined />,
-            disabled: !select,
+            disabled:
+              !select ||
+              (currentNode && !canPreviewInMonaco(currentNode?.title)),
           },
           {
             label: intl.get('重命名'),
@@ -551,7 +566,10 @@ const Script = () => {
               </Tooltip>,
               <Tooltip title={intl.get('编辑')}>
                 <Button
-                  disabled={!select}
+                  disabled={
+                    !select ||
+                    (currentNode && !canPreviewInMonaco(currentNode?.title))
+                  }
                   type="primary"
                   onClick={editFile}
                   icon={<EditOutlined />}
@@ -641,6 +659,7 @@ const Script = () => {
                 fontSize: 12,
                 lineNumbersMinChars: 3,
                 glyphMargin: false,
+                accessibilitySupport: 'off',
               }}
               onMount={(editor) => {
                 editorRef.current = editor;

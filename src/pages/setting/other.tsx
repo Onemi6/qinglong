@@ -22,10 +22,13 @@ import { UploadOutlined } from '@ant-design/icons';
 import Countdown from 'antd/lib/statistic/Countdown';
 import useProgress from './progress';
 import pick from 'lodash/pick';
+import { disableBody } from '@/utils';
+import { TIMEZONES } from '@/utils/const';
 
 const dataMap = {
   'log-remove-frequency': 'logRemoveFrequency',
   'cron-concurrency': 'cronConcurrency',
+  timezone: 'timezone',
 };
 
 const Other = ({
@@ -36,6 +39,7 @@ const Other = ({
   const [systemConfig, setSystemConfig] = useState<{
     logRemoveFrequency?: number | null;
     cronConcurrency?: number | null;
+    timezone?: string | null;
   }>();
   const [form] = Form.useForm();
   const [exportLoading, setExportLoading] = useState(false);
@@ -141,7 +145,7 @@ const Other = ({
       okText: intl.get('重启'),
       onOk() {
         request
-          .put(`${config.apiPrefix}system/reload`, { type: 'data' })
+          .put(`${config.apiPrefix}update/data`)
           .then(() => {
             message.success({
               content: (
@@ -157,6 +161,7 @@ const Other = ({
               ),
               duration: 30,
             });
+            disableBody();
             setTimeout(() => {
               window.location.reload();
             }, 30000);
@@ -250,6 +255,34 @@ const Other = ({
           </Button>
         </Input.Group>
       </Form.Item>
+      <Form.Item label={intl.get('时区')} name="timezone">
+        <Input.Group compact>
+          <Select
+            value={systemConfig?.timezone}
+            style={{ width: 180 }}
+            onChange={(value) => {
+              setSystemConfig({ ...systemConfig, timezone: value });
+            }}
+            options={TIMEZONES.map((timezone) => ({
+              value: timezone,
+              label: timezone,
+            }))}
+            showSearch
+            filterOption={(input, option) =>
+              option?.value?.toLowerCase().indexOf(input.toLowerCase()) >= 0
+            }
+          />
+          <Button
+            type="primary"
+            onClick={() => {
+              updateSystemConfig('timezone');
+            }}
+            style={{ width: 84 }}
+          >
+            {intl.get('确认')}
+          </Button>
+        </Input.Group>
+      </Form.Item>
       <Form.Item label={intl.get('语言')} name="lang">
         <Select
           defaultValue={localStorage.getItem('lang') || ''}
@@ -271,12 +304,18 @@ const Other = ({
           showUploadList={false}
           maxCount={1}
           action={`${config.apiPrefix}system/data/import`}
-          onChange={(e) => {
-            if (e.event?.percent) {
-              showUploadProgress(parseFloat(e.event?.percent.toFixed(1)));
-              if (e.event?.percent === 100) {
-                showReloadModal();
-              }
+          onChange={({ file, event }) => {
+            if (event?.percent) {
+              showUploadProgress(
+                Math.min(parseFloat(event?.percent.toFixed(1)), 99),
+              );
+            }
+            if (file.status === 'done') {
+              showUploadProgress(100);
+              showReloadModal();
+            }
+            if (file.status === 'error') {
+              message.error('上传失败');
             }
           }}
           name="data"
